@@ -108,6 +108,7 @@ class Recognizer:
         try:
             with sd.InputStream(
                 samplerate=config.SAMPLE_RATE,
+                device=config.AUDIO_DEVICE,
                 channels=1,
                 dtype="int16",
                 callback=_audio_cb,
