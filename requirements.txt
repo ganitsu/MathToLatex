@@ -1,0 +1,4 @@
+vosk
+sounddevice
+Pillow
+matplotlib

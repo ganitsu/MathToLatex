@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../math_asr/vosk-model-small-es-0.42"
+		}
+	],
+	"settings": {}
+}
