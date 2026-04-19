@@ -68,6 +68,7 @@ class WordReceiver:
                 config.debug_log("RECEIVER", f"connection lost: {exc}")
             finally:
                 conn.close()
+                self._q.put({"type": "disconnected"})   # ← add this
                 config.debug_log("RECEIVER", "client disconnected — waiting for new connection")
 
         server.close()
