@@ -22,7 +22,7 @@ AUDIO_DEVICE = None   # None = system default (Windows mic)
 SAMPLE_RATE  = 16_000
 
 # ── Network ───────────────────────────────────────────────────────────────────
-RPI_HOST     = "raspberrypi.local"   # hostname or static IP of the RPi
+RPI_HOST     = "192.168.5.10"   # hostname or static IP of the RPi
 NETWORK_PORT = 9876
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
