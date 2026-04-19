@@ -24,6 +24,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 venv_python = os.path.join(script_dir, "venv", "Scripts", "python.exe")
 python      = venv_python if os.path.exists(venv_python) else sys.executable
 
+print(f"[server] using python: {python}")
 
 def start_recognizer():
     global proc
@@ -33,8 +34,9 @@ def start_recognizer():
             return
         print("[server] starting recognizer...")
         proc = subprocess.Popen(
-            [python, "main.py", "--mode", "recognizer"],
+            f'"{os.path.join(script_dir, "venv", "Scripts", "activate")}" && python main.py --mode recognizer',
             cwd=script_dir,
+            shell=True,
         )
         print(f"[server] started (pid {proc.pid})")
 
