@@ -30,7 +30,8 @@ def start_recognizer():
     global proc
     with lock:
         if proc and proc.poll() is None:
-            print("[server] already running")
+            #We will stop it.
+            stop_recognizer()
             return
         print("[server] starting recognizer...")
         proc = subprocess.Popen(
