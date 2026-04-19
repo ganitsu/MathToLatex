@@ -18,7 +18,8 @@ def debug_log(tag: str, message: str) -> None:
     print(f"[{ts}] [{tag}] {message}", file=sys.stderr)
 
 # ── Audio / model configuration ─────────────────────────────────────────────────
-AUDIO_DEVICE = "sysdefault:CARD=Loopback"   # None = system default (for Windows)
+AUDIO_DEVICE = None   # we'll read from FIFO directly #"Microphone Array (Realtek(R) Audio)"
+FIFO_PATH    = "/tmp/mic_audio" 
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
 # When True, compound Spanish number words (catorce, doscientos, etc.) are
