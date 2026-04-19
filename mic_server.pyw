@@ -58,9 +58,15 @@ def stop_recognizer():
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        global proc
+        #If start but already running, stop it.
         if self.path == "/start":
-            start_recognizer()
-            self._respond(200, "started")
+            if proc and proc.poll() is None:
+                stop_recognizer()  
+                self._respond(200, "stopped")
+            else:
+                start_recognizer()
+                self._respond(200, "started")
         elif self.path == "/stop":
             stop_recognizer()
             self._respond(200, "stopped")

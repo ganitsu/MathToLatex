@@ -26,7 +26,7 @@ RPI_HOST     = "192.168.5.10"   # hostname or static IP of the RPi
 NETWORK_PORT = 9876
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
-EXTENDED_NUMBERS = True
+EXTENDED_NUMBERS = False
 
 # ── Special control words ─────────────────────────────────────────────────────
 END_WORD  = "fin"
