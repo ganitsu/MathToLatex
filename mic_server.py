@@ -45,7 +45,10 @@ def stop_recognizer():
     global proc
     with lock:
         if proc and proc.poll() is None:
-            proc.terminate()
+            subprocess.run(
+                ["taskkill", "/f", "/t", "/pid", str(proc.pid)],
+                capture_output=True
+            )
             proc = None
             print("[server] stopped")
         else:
