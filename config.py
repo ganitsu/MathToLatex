@@ -22,7 +22,7 @@ AUDIO_DEVICE = None
 SAMPLE_RATE  = 16_000
 
 # ── Network ───────────────────────────────────────────────────────────────────
-RPI_HOST     = "raspberrypi.local"
+RPI_HOST     = "192.168.5.10"
 NETWORK_PORT = 9876
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
