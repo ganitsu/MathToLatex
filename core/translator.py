@@ -216,12 +216,12 @@ def parse_tokens(words: list[str]) -> list[Token]:
             while i < len(words):
                 nw = words[i]
                 if nw in _DIGIT_WORDS:
-                    if not _cfg.CONCAT_DIGITS:
-                        raise TranslatorError(
-                            f"Concatenación de dígitos deshabilitada: "
-                            f"'{w}' seguido de '{nw}' — "
-                            f"usá un operador entre los números"
-                        )
+                    # if not _cfg.CONCAT_DIGITS:
+                    #     raise TranslatorError(
+                    #         f"Concatenación de dígitos deshabilitada: "
+                    #         f"'{w}' seguido de '{nw}' — "
+                    #         f"usá un operador entre los números"
+                    #     )
                     digits.append(_DIGIT_WORDS[nw]); i += 1
                 elif nw == _cfg.WORD_DECIMAL and not decimal_seen:
                     digits.append("."); decimal_seen = True; i += 1
@@ -576,6 +576,16 @@ def translate(words: list[str]) -> TranslationResult:
     from core.numbers import normalize_numbers
 
     clean = [w for w in words if w != _cfg.END_WORD]
+
+    # Check for consecutive raw digit words BEFORE normalization
+    if not _cfg.CONCAT_DIGITS:
+        for j in range(len(clean) - 1):
+            if clean[j] in _DIGIT_WORDS and clean[j+1] in _DIGIT_WORDS:
+                return TranslationResult(
+                    error=f"Concatenación de dígitos deshabilitada: "
+                          f"'{clean[j]}' seguido de '{clean[j+1]}'"
+                )
+
     clean = normalize_numbers(clean)
     clean = apply_edits(clean)
     if not clean:
