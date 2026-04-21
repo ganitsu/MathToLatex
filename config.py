@@ -18,15 +18,16 @@ def debug_log(tag: str, message: str) -> None:
     print(f"[{ts}] [{tag}] {message}", file=sys.stderr)
 
 # ── Audio ─────────────────────────────────────────────────────────────────────
-AUDIO_DEVICE = None   # None = system default (Windows mic)
+AUDIO_DEVICE = None
 SAMPLE_RATE  = 16_000
 
 # ── Network ───────────────────────────────────────────────────────────────────
-RPI_HOST     = "192.168.5.10"   # hostname or static IP of the RPi
+RPI_HOST     = "raspberrypi.local"
 NETWORK_PORT = 9876
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
-EXTENDED_NUMBERS = False
+EXTENDED_NUMBERS = True
+CONCAT_DIGITS    = True   # False → "uno tres" raises an error instead of 13
 
 # ── Special control words ─────────────────────────────────────────────────────
 END_WORD  = "fin"
@@ -48,6 +49,7 @@ WORD_UNTIL    = "hasta"
 
 # ── Variable / constant words ─────────────────────────────────────────────────
 WORD_PI      = "pi"
+WORD_E       = "euler"   # Euler's number e ≈ 2.718
 WORD_X       = "equis"
 WORD_Y       = "y"
 WORD_Z       = "zeta"
@@ -64,26 +66,63 @@ WORD_SQRT    = "raiz"
 # ── Calculus words ────────────────────────────────────────────────────────────
 WORD_SUM      = "sumatoria"
 WORD_INTEGRAL = "integral"
-WORD_SUB      = "sub"
-WORD_FROM     = "desde"
+WORD_FROM     = "desde"    # lower-bound marker for sum and integral
+WORD_UNTIL    = "hasta"    # upper-bound marker
 
 # ── Decimal separator ─────────────────────────────────────────────────────────
 WORD_DECIMAL = "coma"
 
+# ── SI Prefixes ───────────────────────────────────────────────────────────────
+# Mapping: spoken word → (LaTeX symbol, power of 10)
+SI_PREFIXES: dict[str, tuple[str, int]] = {
+    # "yotta": ("Y",      24),
+    # "zetta": ("Z",      21),
+    # "exa":   ("E",      18),
+    # "peta":  ("P",      15),
+    "tera":  ("T",      12),
+    "giga":  ("G",       9),
+    "mega":  ("M",       6),
+    "kilo":  ("k",       3),
+    "hecto": ("h",       2),
+    "deca":  ("da",      1),
+    "deci":  ("d",      -1),
+    "centi": ("c",      -2),
+    "mili":  ("m",      -3),
+    "micro": (r"\mu",   -6),
+    "nano":  ("n",      -9),
+    "pico":  ("p",     -12),
+    # "femto": ("f",     -15),
+    # "ato":   ("a",     -18),
+    # "zepto": ("z",     -21),
+    # "yocto": ("y",     -24),
+}
+
 # ── Full vocabulary (used by Vosk) ────────────────────────────────────────────
 def _build_vocabulary() -> list[str]:
     base = [
+        # single digits
         "cero", "uno", "dos", "tres", "cuatro", "cinco",
         "seis", "siete", "ocho", "nueve",
+        # arithmetic
         WORD_PLUS, WORD_PLUS_ALT, WORD_MINUS, WORD_TIMES, WORD_OVER,
         WORD_POW, WORD_POW_ALT,
+        # grouping
         WORD_LPAREN, WORD_RPAREN,
+        # relational
         WORD_EQUALS,
+        # decimal
         WORD_DECIMAL,
-        WORD_PI, WORD_X, WORD_Y, WORD_Z, WORD_N,
+        # variables / constants
+        WORD_PI, WORD_E, WORD_X, WORD_Y, WORD_Z, WORD_N,
+        # functions
         WORD_SIN, WORD_COS, WORD_TAN, WORD_LN, WORD_INVERSE, WORD_SQRT,
-        WORD_SUM, WORD_INTEGRAL, WORD_SUB, WORD_FROM,
+        # calculus (no more 'sub')
+        WORD_SUM, WORD_INTEGRAL, WORD_FROM,
+        # upper-bound separator
         WORD_UNTIL,
+        # SI prefixes
+        *SI_PREFIXES.keys(),
+        # control  ← always last
         DEL_WORD, REDO_WORD, END_WORD,
     ]
     if EXTENDED_NUMBERS:

@@ -18,7 +18,7 @@ import sympy as sp
 from sympy import lambdify, latex as sp_latex
 
 from core.translator import (
-    ASTNode, NumNode, VarNode, BinOpNode, UnaryMinusNode,
+    ASTNode, NumNode, PrefixNode, VarNode, BinOpNode, UnaryMinusNode,  # ← PrefixNode added
     ParenNode, EqNode, FuncNode, SumNode, IntegralNode, IndefiniteIntegralNode,
     TranslatorError,
 )
@@ -46,10 +46,15 @@ class AnalysisResult:
 def ast_to_sympy(node: ASTNode) -> sp.Basic:
     if isinstance(node, NumNode):
         return sp.Float(node.value) if "." in node.value else sp.Integer(int(node.value))
+
+    if isinstance(node, PrefixNode):
+        return ast_to_sympy(node.number) * sp.Integer(10) ** node.exponent
+
     if isinstance(node, VarNode):
         return {
             "x": _x, "y": _y, "z": _z, "n": _n,
             r"\pi": sp.pi,
+            "e":    sp.E,
         }.get(node.name, sp.Symbol(node.name))
     if isinstance(node, UnaryMinusNode):
         return -ast_to_sympy(node.operand)
@@ -216,6 +221,35 @@ def _plot_3d_surfaces(z_expressions: list, var_pair=(_x, _y)) -> Figure:
     fig.tight_layout(pad=0.4)
     return fig
 
+def _plot_2d_multi(exprs: list) -> Figure:
+    """Plot multiple y=f(x) branches on the same axes (e.g. both halves of a circle)."""
+    fig, ax = plt.subplots(figsize=(7.2, 3.8), facecolor=_BG)
+    _style_ax(ax)
+    plotted = False
+    for expr in exprs:
+        try:
+            f  = lambdify(_x, expr, modules=["numpy"])
+            xs = np.linspace(-10, 10, 1000)
+            ys = np.asarray(f(xs), dtype=float)
+            y_fin = ys[np.isfinite(ys)]
+            if y_fin.size == 0:
+                continue
+            clip = max(abs(y_fin).max() * 1.2, 1.0)
+            ys   = np.clip(ys, -clip, clip)
+            ys[~np.isfinite(ys)] = np.nan
+            ax.plot(xs, ys, color=_LINE, linewidth=2.2, solid_capstyle="round")
+            plotted = True
+        except Exception as exc:
+            debug_log("SYMPY", f"multi-branch plot failed: {exc}")
+    if not plotted:
+        plt.close(fig)
+        raise ValueError("No se pudo graficar ninguna rama")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_xlabel("x", color=_TICK, fontsize=9)
+    ax.set_ylabel("y", color=_TICK, fontsize=9, rotation=0, labelpad=10)
+    fig.tight_layout(pad=0.6)
+    return fig
+
 
 def _try_graph(sym_expr: sp.Basic) -> Figure | None:
     if isinstance(sym_expr, sp.Eq):
@@ -241,11 +275,15 @@ def _try_graph(sym_expr: sp.Basic) -> Figure | None:
                 solve_for = next(iter(free_2))
                 try:
                     sols = sp.solve(sym_expr, solve_for)
-                    expr = sols[0] if sols else lhs - rhs
+                    if sols:
+                        # Multiple solutions (e.g. x²+y²=1 → y=±√(1-x²)) → plot all branches
+                        if len(sols) > 1 and solve_for == _y:
+                            return _plot_2d_multi(sols)
+                        expr = sols[0]
+                    else:
+                        expr = lhs - rhs
                 except Exception:
                     expr = lhs - rhs
-            else:
-                expr = lhs - rhs
     else:
         expr = sym_expr
 

@@ -13,12 +13,10 @@ Pipeline: word list -> TranslationResult
 Public surface:
     translate(words) -> TranslationResult  (.ok, .latex, .error, .ast)
 
-Summation:  sumatoria sub ene igual <lo> (hasta|elevado ala) <hi> <body>
-Integral:   integral  sub           <lo> (hasta|elevado ala) <hi> <body>
-
-LaTeX note: all backslash-command symbols (e.g. \pi) are wrapped in {} so
-that juxtaposition is always safe: {\pi}x, {\pi}{\pi}, 2{\pi}.  Nobody
-cares how the raw LaTeX looks as long as it renders correctly.
+Summation:  sumatoria desde <lo> hasta <hi> <body>   (n is always the variable)
+Integral:   integral  desde <lo> hasta <hi> <body>   (definite)
+            integral  desde hasta <body>              (indefinite)
+            integral  <body>                          (indefinite, old syntax)
 """
 
 from __future__ import annotations
@@ -49,32 +47,33 @@ class TranslationResult:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TT(Enum):
-    NUMBER   = auto()
-    PI       = auto()
-    X        = auto()
-    Y        = auto()
-    Z        = auto()
-    N        = auto()
-    PLUS     = auto()
-    MINUS    = auto()
-    TIMES    = auto()
-    OVER     = auto()
-    POW      = auto()
-    LPAREN   = auto()
-    RPAREN   = auto()
-    EQUALS   = auto()
-    SIN      = auto()
-    COS      = auto()
-    TAN      = auto()
-    LN       = auto()
-    INVERSE  = auto()
-    SUM      = auto()
-    INTEGRAL = auto()
-    SUB      = auto()   # lower-bound marker for sumatoria
-    FROM     = auto()   # 'desde' — lower-bound marker for integral
-    UNTIL    = auto()   # 'hasta' — upper-bound marker for sum/integral
-    SQRT     = auto()   # 'raiz'  — square root
-    EOF      = auto()
+    NUMBER    = auto()
+    SI_PREFIX = auto()   # emitted after a NUMBER when followed by an SI prefix word
+    PI        = auto()
+    E         = auto()   # Euler's number
+    X         = auto()
+    Y         = auto()
+    Z         = auto()
+    N         = auto()
+    PLUS      = auto()
+    MINUS     = auto()
+    TIMES     = auto()
+    OVER      = auto()
+    POW       = auto()
+    LPAREN    = auto()
+    RPAREN    = auto()
+    EQUALS    = auto()
+    SIN       = auto()
+    COS       = auto()
+    TAN       = auto()
+    LN        = auto()
+    INVERSE   = auto()
+    SUM       = auto()
+    INTEGRAL  = auto()
+    FROM      = auto()   # 'desde'
+    UNTIL     = auto()   # 'hasta'
+    SQRT      = auto()
+    EOF       = auto()
 
 
 @dataclass
@@ -82,7 +81,6 @@ class Token:
     kind:       TT
     value:      str   = ""
     word_index: int   = -1
-    # Future: populate from Vosk word-level timing
     start_ms:   float | None = None
     end_ms:     float | None = None
 
@@ -96,8 +94,15 @@ class NumNode:
     value: str
 
 @dataclass
+class PrefixNode:
+    """A number with an SI prefix: e.g. 5 nano → 5 × 10⁻⁹, displayed as 5\,\mathrm{n}"""
+    number:   "ASTNode"
+    symbol:   str    # LaTeX symbol, e.g. "n", "k", r"\mu"
+    exponent: int    # power of 10, e.g. -9
+
+@dataclass
 class VarNode:
-    name: str     # LaTeX: "x", "y", "z", "n", r"\pi"
+    name: str     # LaTeX: "x", "y", "z", "n", r"\pi", "e"
 
 @dataclass
 class BinOpNode:
@@ -139,11 +144,10 @@ class IntegralNode:
 
 @dataclass
 class IndefiniteIntegralNode:
-    """Indefinite integral: ∫ body dx  (no bounds)"""
     body: "ASTNode"
 
 ASTNode = Union[
-    NumNode, VarNode, BinOpNode, UnaryMinusNode,
+    NumNode, PrefixNode, VarNode, BinOpNode, UnaryMinusNode,
     ParenNode, EqNode, FuncNode, SumNode, IntegralNode, IndefiniteIntegralNode,
 ]
 
@@ -160,7 +164,7 @@ def _find_del_point(words: list[str]) -> int:
     return 0
 
 def apply_edits(words: list[str]) -> list[str]:
-    committed: list[str]       = []
+    committed: list[str]        = []
     undo_stack: list[list[str]] = []
     for w in words:
         if w == _cfg.DEL_WORD:
@@ -196,7 +200,6 @@ def parse_tokens(words: list[str]) -> list[Token]:
     i = 0
 
     def _add(tok: Token) -> None:
-        # Collapse consecutive POW (elevado + ala → single ^)
         if tok.kind == TT.POW and tokens and tokens[-1].kind == TT.POW:
             return
         tokens.append(tok)
@@ -213,40 +216,51 @@ def parse_tokens(words: list[str]) -> list[Token]:
             while i < len(words):
                 nw = words[i]
                 if nw in _DIGIT_WORDS:
+                    if not _cfg.CONCAT_DIGITS:
+                        raise TranslatorError(
+                            f"Concatenación de dígitos deshabilitada: "
+                            f"'{w}' seguido de '{nw}' — "
+                            f"usá un operador entre los números"
+                        )
                     digits.append(_DIGIT_WORDS[nw]); i += 1
                 elif nw == _cfg.WORD_DECIMAL and not decimal_seen:
                     digits.append("."); decimal_seen = True; i += 1
                 else:
                     break
             tokens.append(Token(TT.NUMBER, "".join(digits), start))
+            # ── SI prefix immediately after number ────────────────────────────
+            if i < len(words) and words[i] in _cfg.SI_PREFIXES:
+                sym, exp = _cfg.SI_PREFIXES[words[i]]
+                tokens.append(Token(TT.SI_PREFIX, f"{sym}:{exp}", i))
+                i += 1
             continue
 
         # ── keyword map ───────────────────────────────────────────────────────
         kw: dict[str, Token | None] = {
-            _cfg.WORD_PLUS:      Token(TT.PLUS,     "+",   i),
-            _cfg.WORD_PLUS_ALT:  Token(TT.PLUS,     "+",   i),
-            _cfg.WORD_MINUS:     Token(TT.MINUS,    "-",   i),
-            _cfg.WORD_TIMES:     Token(TT.TIMES,    "*",   i),
-            _cfg.WORD_OVER:      Token(TT.OVER,     "/",   i),
-            _cfg.WORD_POW:       Token(TT.POW,      "^",   i),
-            _cfg.WORD_POW_ALT:   Token(TT.POW,      "^",   i),
+            _cfg.WORD_PLUS:      Token(TT.PLUS,     "+",     i),
+            _cfg.WORD_PLUS_ALT:  Token(TT.PLUS,     "+",     i),
+            _cfg.WORD_MINUS:     Token(TT.MINUS,    "-",     i),
+            _cfg.WORD_TIMES:     Token(TT.TIMES,    "*",     i),
+            _cfg.WORD_OVER:      Token(TT.OVER,     "/",     i),
+            _cfg.WORD_POW:       Token(TT.POW,      "^",     i),
+            _cfg.WORD_POW_ALT:   Token(TT.POW,      "^",     i),
             _cfg.WORD_UNTIL:     Token(TT.UNTIL,    "hasta", i),
-            _cfg.WORD_LPAREN:    Token(TT.LPAREN,   "(",   i),
-            _cfg.WORD_RPAREN:    Token(TT.RPAREN,   ")",   i),
-            _cfg.WORD_EQUALS:    Token(TT.EQUALS,   "=",   i),
-            _cfg.WORD_PI:        Token(TT.PI,       "pi",  i),
-            _cfg.WORD_X:         Token(TT.X,        "x",   i),
-            _cfg.WORD_Y:         Token(TT.Y,        "y",   i),
-            _cfg.WORD_Z:         Token(TT.Z,        "z",   i),
-            _cfg.WORD_N:         Token(TT.N,        "n",   i),
-            _cfg.WORD_SIN:       Token(TT.SIN,      "sin", i),
-            _cfg.WORD_COS:       Token(TT.COS,      "cos", i),
-            _cfg.WORD_TAN:       Token(TT.TAN,      "tan", i),
-            _cfg.WORD_LN:        Token(TT.LN,       "ln",  i),
-            _cfg.WORD_INVERSE:   Token(TT.INVERSE,  "inv", i),
-            _cfg.WORD_SUM:       Token(TT.SUM,      "sum", i),
-            _cfg.WORD_INTEGRAL:  Token(TT.INTEGRAL, "int", i),
-            _cfg.WORD_SUB:       Token(TT.SUB,      "_",   i),
+            _cfg.WORD_LPAREN:    Token(TT.LPAREN,   "(",     i),
+            _cfg.WORD_RPAREN:    Token(TT.RPAREN,   ")",     i),
+            _cfg.WORD_EQUALS:    Token(TT.EQUALS,   "=",     i),
+            _cfg.WORD_PI:        Token(TT.PI,       "pi",    i),
+            _cfg.WORD_E:         Token(TT.E,        "e",     i),
+            _cfg.WORD_X:         Token(TT.X,        "x",     i),
+            _cfg.WORD_Y:         Token(TT.Y,        "y",     i),
+            _cfg.WORD_Z:         Token(TT.Z,        "z",     i),
+            _cfg.WORD_N:         Token(TT.N,        "n",     i),
+            _cfg.WORD_SIN:       Token(TT.SIN,      "sin",   i),
+            _cfg.WORD_COS:       Token(TT.COS,      "cos",   i),
+            _cfg.WORD_TAN:       Token(TT.TAN,      "tan",   i),
+            _cfg.WORD_LN:        Token(TT.LN,       "ln",    i),
+            _cfg.WORD_INVERSE:   Token(TT.INVERSE,  "inv",   i),
+            _cfg.WORD_SUM:       Token(TT.SUM,      "sum",   i),
+            _cfg.WORD_INTEGRAL:  Token(TT.INTEGRAL, "int",   i),
             _cfg.WORD_FROM:      Token(TT.FROM,     "desde", i),
             _cfg.WORD_SQRT:      Token(TT.SQRT,     "raiz",  i),
             # silently consumed
@@ -274,7 +288,7 @@ def parse_tokens(words: list[str]) -> list[Token]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PRIMARY_STARTERS = {
-    TT.NUMBER, TT.PI, TT.X, TT.Y, TT.Z, TT.N,
+    TT.NUMBER, TT.PI, TT.E, TT.X, TT.Y, TT.Z, TT.N,
     TT.LPAREN, TT.SIN, TT.COS, TT.TAN, TT.LN,
     TT.SUM, TT.INTEGRAL, TT.SQRT,
 }
@@ -294,15 +308,6 @@ class _Parser:
         if self._peek().kind != k:
             raise TranslatorError(msg)
         return self._advance()
-
-    def _expect_upper_sep(self, ctx: str) -> None:
-        """Accept either 'elevado ala' (POW) or 'hasta' (UNTIL) as upper-bound marker."""
-        if self._match(TT.POW, TT.UNTIL):
-            self._advance()
-        else:
-            raise TranslatorError(
-                f"Falta 'hasta' o 'elevado ala' para el límite superior de {ctx}"
-            )
 
     def parse(self) -> ASTNode:
         node = self._equality()
@@ -344,7 +349,7 @@ class _Parser:
         base = self._unary()
         if self._match(TT.POW):
             self._advance()
-            return BinOpNode("^", base, self._power())   # right-associative
+            return BinOpNode("^", base, self._power())
         return base
 
     def _unary(self) -> ASTNode:
@@ -381,8 +386,17 @@ class _Parser:
     def _primary(self) -> ASTNode:
         tok = self._peek()
 
-        if tok.kind == TT.NUMBER:   self._advance(); return NumNode(tok.value)
+        if tok.kind == TT.NUMBER:
+            self._advance()
+            num = NumNode(tok.value)
+            if self._match(TT.SI_PREFIX):
+                pt = self._advance()
+                sym, exp_s = pt.value.split(":")
+                return PrefixNode(num, sym, int(exp_s))
+            return num
+
         if tok.kind == TT.PI:       self._advance(); return VarNode(r"\pi")
+        if tok.kind == TT.E:        self._advance(); return VarNode("e")
         if tok.kind == TT.X:        self._advance(); return VarNode("x")
         if tok.kind == TT.Y:        self._advance(); return VarNode("y")
         if tok.kind == TT.Z:        self._advance(); return VarNode("z")
@@ -391,31 +405,40 @@ class _Parser:
         if tok.kind in (TT.SIN, TT.COS, TT.TAN, TT.LN, TT.SQRT):
             return self._primary_func()
 
-        # ── sumatoria sub ene igual <lo> (hasta|POW) <hi> <body> ─────────────
+        # ── sumatoria desde <lo> hasta <hi> <body> ────────────────────────────
+        # n is always the summation variable
         if tok.kind == TT.SUM:
             self._advance()
-            self._expect(TT.SUB,    "Falta 'sub' después de 'sumatoria'")
-            self._expect(TT.N,      "Falta 'ene' después de 'sub' en sumatoria")
-            self._expect(TT.EQUALS, "Falta 'igual' para el límite inferior")
+            self._expect(TT.FROM,  "Falta 'desde' después de 'sumatoria'")
             lower = self._primary()
-            self._expect_upper_sep("sumatoria")
+            self._expect(TT.UNTIL, "Falta 'hasta' para el límite superior de sumatoria")
             upper = self._primary()
-            body  = self._primary()
+            body  = self._additive()
             return SumNode("n", lower, upper, body)
 
-        # ── integral [desde <lo> hasta <hi>] <body> ────────────────────────────
-        # 'desde' present → definite integral; absent → indefinite
+        # ── integral ──────────────────────────────────────────────────────────
+        # integral desde <lo> hasta <hi> <body>  →  definite
+        # integral desde hasta <body>             →  indefinite (new syntax)
+        # integral <body>                         →  indefinite (old syntax)
         if tok.kind == TT.INTEGRAL:
             self._advance()
             if self._match(TT.FROM):
                 self._advance()
-                lower = self._primary()
-                self._expect_upper_sep("integral")
-                upper = self._primary()
-                body  = self._primary()
-                return IntegralNode(lower, upper, body)
+                if self._match(TT.UNTIL):
+                    # indefinite: integral desde hasta <body>
+                    self._advance()
+                    body = self._additive()
+                    return IndefiniteIntegralNode(body)
+                else:
+                    # definite: integral desde <lo> hasta <hi> <body>
+                    lower = self._primary()
+                    self._expect(TT.UNTIL, "Falta 'hasta' para el límite superior de integral")
+                    upper = self._primary()
+                    body  = self._additive()
+                    return IntegralNode(lower, upper, body)
             else:
-                body = self._primary()
+                # old indefinite syntax
+                body = self._additive()
                 return IndefiniteIntegralNode(body)
 
         if tok.kind == TT.LPAREN:
@@ -426,10 +449,8 @@ class _Parser:
 
         if tok.kind == TT.RPAREN:
             raise TranslatorError("'ca' sin 'ba' correspondiente")
-        if tok.kind == TT.SUB:
-            raise TranslatorError("'sub' solo puede usarse después de 'sumatoria'")
         if tok.kind == TT.FROM:
-            raise TranslatorError("'desde' solo puede usarse después de 'integral'")
+            raise TranslatorError("'desde' solo puede usarse después de 'integral' o 'sumatoria'")
         if tok.kind == TT.UNTIL:
             raise TranslatorError("'hasta' solo puede usarse dentro de sumatoria o integral definida")
         if tok.kind == TT.EOF:
@@ -446,15 +467,15 @@ class _Parser:
 def _mul_style(left: ASTNode, right: ASTNode) -> str:
     """
     Decide multiplication rendering style.
-    All backslash symbols are wrapped in braces so juxtaposition is always safe.
+
     Rules:
-      number * number   -> cdot  (avoids "35" being read as thirty-five)
-      func   * anything -> cdot  (sin(x)*2 looks better with explicit dot)
-      everything else   -> juxt  (2x, xy, {pi}x, 2(x+1), etc.)
+      anything * number   → cdot  (prevents digit merging: fn·5·3 not fn·53)
+      func     * anything → cdot
+      sqrt     on right   → juxt  (2√x looks natural)
+      everything else     → juxt  (2x, xy, 2(x+1), etc.)
     """
-    if isinstance(left, NumNode) and isinstance(right, NumNode):
+    if isinstance(right, NumNode):
         return "cdot"
-    # \sqrt is written without cdot: 2\sqrt{x}, x\sqrt{y}
     if isinstance(right, FuncNode) and right.func == r"\sqrt":
         return "juxt"
     if isinstance(left, FuncNode) or isinstance(right, FuncNode):
@@ -466,11 +487,17 @@ def render_latex(node: ASTNode) -> str:
     if isinstance(node, NumNode):
         return node.value
 
+    if isinstance(node, PrefixNode):
+        num_s = render_latex(node.number)
+        sym   = node.symbol
+        # \mu already has backslash; all others get \mathrm{}
+        sym_s = sym if sym.startswith("\\") else rf"\mathrm{{{sym}}}"
+        return rf"{num_s}\,{sym_s}"
+
     if isinstance(node, VarNode):
-        # Wrap backslash commands in {} so juxtaposition is always unambiguous.
-        # {\pi}x renders correctly; {\pi}{\pi} too.  Plain variables (x,y,z,n)
-        # are single chars and need no wrapping.
         n = node.name
+        if n == "e":
+            return r"\mathrm{e}"
         return f"{{{n}}}" if n.startswith("\\") else n
 
     if isinstance(node, UnaryMinusNode):
@@ -483,7 +510,6 @@ def render_latex(node: ASTNode) -> str:
         return f"{render_latex(node.left)} = {render_latex(node.right)}"
 
     if isinstance(node, FuncNode):
-        # sqrt renders as \sqrt{arg} — no \left\right wrapping
         if node.func == r"\sqrt":
             return rf"\sqrt{{{render_latex(node.arg)}}}"
         inv = "^{-1}" if node.inverse else ""
@@ -518,7 +544,7 @@ def render_latex(node: ASTNode) -> str:
         if node.op in ("*", "implicit*"):
             style = _mul_style(node.left, node.right)
             if style == "cdot": return rf"{L} \cdot {R}"
-            return f"{L}{R}"   # juxt — {} wrapping already ensures correctness
+            return f"{L}{R}"
 
         if node.op == "/":
             return rf"\frac{{{L}}}{{{R}}}"
