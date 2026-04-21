@@ -27,7 +27,7 @@ NETWORK_PORT = 9876
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
 EXTENDED_NUMBERS = True
-CONCAT_DIGITS    = True   # False → "uno tres" raises an error instead of 13
+CONCAT_DIGITS    = False   # False → "uno tres" raises an error instead of 13
 
 # ── Special control words ─────────────────────────────────────────────────────
 END_WORD  = "fin"
